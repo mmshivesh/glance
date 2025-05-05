@@ -80,7 +80,7 @@ jobs:
             uses: softprops/action-gh-release@v1
             with:
                 tag_name: nightly
-                name: Nightly Build - ${{ github.event.schedule != '' && steps.date.outputs.date || github.run_id }}
+                name: Nightly Build - ${{ github.event.schedule != '' && steps.date.outputs.date || steps.date.outputs.date }}
                 body_path: changelog.txt
                 prerelease: true
             env:
