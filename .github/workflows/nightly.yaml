@@ -1,0 +1,86 @@
+name: Nightly Release
+
+on:
+    schedule:
+        - cron: '0 1 * * *'
+    workflow_dispatch:
+
+env:
+    IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/glance
+
+jobs:
+    nightly-build:
+        runs-on: ubuntu-latest
+        steps:
+          - name: Get nightly run date
+            id: date
+            run: echo "date=$(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+          - name: Checkout forked repo
+            uses: actions/checkout@v4
+            with:
+                fetch-depth: 0
+
+          - name: Add upstream remote
+            run: git remote add upstream https://github.com/glanceapp/glance.git
+
+          - name: Fetch upstream changes
+            run: git fetch upstream
+
+          - name: Get latest dev branch commit hash
+            id: upstream
+            run: echo "sha=$(git rev-parse upstream/dev)" >> "$GITHUB_OUTPUT"
+
+          - name: Get last nightly commit hash
+            id: lastnightly
+            run: |
+                if git rev-parse nightly 2>/dev/null; then
+                    echo "sha=$(git rev-parse nightly)" >> "$GITHUB_OUTPUT"
+                else
+                    echo "sha=" >> "$GITHUB_OUTPUT"
+                fi
+
+          - name: Check if there are new commits
+            id: check
+            run: |
+                if [ "${{ steps.upstream.outputs.sha }}" = "${{ steps.lastnightly.outputs.sha }}" ]; then
+                    echo "changed=false" >> "$GITHUB_OUTPUT"
+                else
+                    echo "changed=true" >> "$GITHUB_OUTPUT"
+                fi
+
+          - name: Generate changelog from merged PRs
+            if: steps.check.outputs.changed == 'true'
+            env:
+                GH_REPO: glanceapp/glance
+            run: |
+                REPO_URL="https://github.com/${GH_REPO}"
+                gh pr list --state merged \
+                --search "base:dev" \
+                --json number,title,author,mergeCommit \
+                --template '{{range .}}{{if and .mergeCommit}}{{printf "[#%v](%s/pull/%v) - %s (thanks %s)\n" .number "'"$REPO_URL"'" .number .title .author.login}}{{end}}{{end}}' \
+                > changelog.txt
+
+          - name: Build Docker image
+            if: steps.check.outputs.changed == 'true'
+            run: docker build -t $IMAGE_NAME:nightly .
+
+          - name: Login to GHCR
+            run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          - name: Push Docker image
+            if: steps.check.outputs.changed == 'true'
+            run: |
+                IMAGE_ID=$IMAGE_NAME
+                IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+                docker push $IMAGE_ID:nightly
+
+          - name: Create/Update Nightly Release
+            uses: softprops/action-gh-release@v1
+            with:
+                tag_name: nightly
+                name: Nightly Build - ${{ github.event.schedule != '' && steps.date.outputs.date || github.run_id }}
+                body_path: changelog.txt
+                prerelease: true
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
