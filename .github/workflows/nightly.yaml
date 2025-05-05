@@ -51,8 +51,6 @@ jobs:
 
           - name: Generate changelog from merged PRs
             if: steps.check.outputs.changed == 'true'
-            env:
-                GH_REPO: glanceapp/glance
             run: |
                 REPO_URL="https://github.com/${GH_REPO}"
                 gh pr list --state merged \
@@ -60,6 +58,9 @@ jobs:
                 --json number,title,author,mergeCommit \
                 --template '{{range .}}{{if and .mergeCommit}}{{printf "[#%v](%s/pull/%v) - %s (thanks %s)\n" .number "'"$REPO_URL"'" .number .title .author.login}}{{end}}{{end}}' \
                 > changelog.txt
+            env:
+                GH_REPO: glanceapp/glance
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           - name: Build Docker image
             if: steps.check.outputs.changed == 'true'
